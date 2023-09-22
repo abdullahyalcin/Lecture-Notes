@@ -2,22 +2,104 @@ AWSTemplateFormatVersion: 2010-09-09
 Description: |
   This CFN template create ASG and ALB with ASG Target Tracking Policy 
 Parameters:
-  
 
-  
+  MyVPC:
+    Description: Choose your VPC
+    Type: AWS::EC2::VPC::Id
+
+  SubnetList:
+    Description: Choose at least 2 subnets
+    Type: List<AWS::EC2::Subnet::Id>
+
+  MyKeyPair:
+    Description: Choose your own key pair
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: firstkey
+
+  MyInstanceType:
+    Description: Choose your own instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+         - t2.micro
+         - t2.nano
+         - t3.micro
+  EnvType:
+    Description: Choose your Enviromenment Type
+    Type: String
+    AllowedValues:
+         - prod
+         - test
 Mappings:
-  
+  RegionImageMap:
+    us-east-1:
+      prod: ami-03a6eaae9938c858c
+      test: ami-098143f68772b34f5
+    us-east-2:
+      prod: ami-0d406e26e5ad4de53
+      test: ami-0dbb0f9887f1fe98f
+    us-west-1:
+      prod: ami-0062dbf6b829f04e1
+      test: ami-04669a22aad391419
 
-  
 Resources:
+
+  MyScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref MyASG # Required
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification: 
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 60.0
+
+  MyASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: abdullahcfn15
+      DesiredCapacity: 1
+      HealthCheckType: ELB
+      LaunchTemplate:
+        LaunchTemplateId: !Ref MyLT
+        Version: !GetAtt MyLT.DefaultVersionNumber
+      MaxSize: 3 # Required
+      MinSize: 1 # Required
+      TargetGroupARNs: 
+        - !GetAtt MyTargGrp.TargetGroupArn  # !Ref MyTargetGrp
+      VPCZoneIdentifier: !Ref SubnetList # not array
+      
+
+  MyListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions: # Required
+        - TargetGroupArn: !GetAtt MyTargGrp.TargetGroupArn  # !Ref MyTargetGrp
+          Type: forward
+      LoadBalancerArn: !Ref MyELB # Required
+      Port: 80
+      Protocol: HTTP
+
+
+  MyELB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: abdullahcfn15
+      SecurityGroups: 
+        - !Ref MySecGrp #!GetAtt MySecGrp.GroupId
+      Subnets: !Ref SubnetList
+      Type: application
 
   MyLT:
     Type: AWS::EC2::LaunchTemplate
     Properties:
       LaunchTemplateData:
-        ImageId: "String"
-        InstanceType: "String"
-        KeyName: "String"
+        ImageId: !FindInMap 
+          - RegionImageMap
+          - !Ref "AWS::Region"
+          - !Ref EnvType
+        InstanceType: !Ref MyInstanceType
+        KeyName: !Ref MyKeyPair
         SecurityGroupIds:
           - !GetAtt MySecGrp.GroupId #!Ref MySecGrp
         UserData: !Base64 |
@@ -66,7 +148,7 @@ Resources:
       Port: 80
       Protocol: HTTP
       UnhealthyThresholdCount: 2
-      VpcId: # Laterr
+      VpcId: !Ref MyVPC # Later
 
   MySecGrp:
     Type: AWS::EC2::SecurityGroup
@@ -82,8 +164,14 @@ Resources:
           FromPort: 22
           ToPort: 22
           CidrIp: 0.0.0.0/0
-      VpcId: "String" #LATER
+      VpcId: !Ref MyVPC #LATER
   
 
   
 Outputs:
+  DNSofELB:
+    Description: Gives DNS of ELB 
+    Value: !Join
+    - ''
+    - - 'http://'
+      - !GetAtt MyELB.DNSName
